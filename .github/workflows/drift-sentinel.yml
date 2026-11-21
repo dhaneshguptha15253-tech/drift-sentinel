@@ -10,22 +10,322 @@ permissions:
 
 jobs:
   drift-sentinel-comment:
-    name: Post test PR comment
+    name: Drift Sentinel CI and PR Comment
     runs-on: ubuntu-latest
 
     steps:
-      - name: Post hardcoded test comment
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Demo API dependencies
+        run: npm --prefix demo-api install
+
+      - name: Install Observer dependencies
+        run: npm --prefix observer install
+
+      - name: Run Demo API test suite
+        run: node --test demo-api/test/users.test.js
+
+      - name: Run Observer test suite
+        run: node --test observer/test/observer.test.js
+
+      - name: Run Classifier test suite
+        run: node --test classifier/test/classifier.test.js classifier/test/flatten.test.js classifier/test/comprehensive.test.js
+
+      - name: Start Demo API
+        run: nohup node demo-api/src/server.js > demo-api.log 2>&1 &
+
+      - name: Start Observer
+        run: nohup node observer/src/server.js > observer.log 2>&1 &
+
+      - name: Wait for Demo API readiness
+        run: |
+          TIMEOUT=30
+          COUNTER=0
+          until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/users/1)" = "200" ]; do
+            if [ $COUNTER -ge $TIMEOUT ]; then
+              echo "Error: Demo API did not become ready within ${TIMEOUT}s"
+              cat demo-api.log 2>/dev/null || true
+              exit 1
+            fi
+            echo "Waiting for Demo API to be ready ($COUNTER/$TIMEOUT)..."
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+          done
+          echo "Demo API is ready."
+
+      - name: Wait for Observer readiness
+        run: |
+          TIMEOUT=30
+          COUNTER=0
+          until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/usage)" = "200" ]; do
+            if [ $COUNTER -ge $TIMEOUT ]; then
+              echo "Warning: Observer did not become ready within ${TIMEOUT}s."
+              cat observer.log 2>/dev/null || true
+              break
+            fi
+            echo "Waiting for Observer to be ready ($COUNTER/$TIMEOUT)..."
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+          done
+
+          if [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/usage)" = "200" ]; then
+            echo "Observer is ready at http://localhost:5001/usage."
+            echo "OBSERVER_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "Observer is unavailable. Allowing workflow to continue to fallback logic."
+            echo "OBSERVER_AVAILABLE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Test POST /reports with tracker report
+        if: env.OBSERVER_AVAILABLE == 'true'
+        run: |
+          REPORT_PAYLOAD='{
+            "client": "web",
+            "version": "1",
+            "strict": false,
+            "reads": [
+              { "endpoint": "GET /users/:id", "path": "user_name" },
+              { "endpoint": "GET /users/:id", "path": "orders[].total" }
+            ]
+          }'
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:5001/reports \
+            -H "Content-Type: application/json" \
+            -d "$REPORT_PAYLOAD")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Status: $HTTP_CODE"
+          echo "Response Body: $HTTP_BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Error: POST /reports failed with status $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Verify GET /usage returns submitted report
+        if: env.OBSERVER_AVAILABLE == 'true'
+        run: |
+          USAGE_JSON=$(curl -s -f http://localhost:5001/usage)
+          echo "Usage map response: $USAGE_JSON"
+
+          node -e '
+            const usage = JSON.parse(process.argv[1]);
+            const endpointUsage = usage["GET /users/:id"];
+            if (!endpointUsage) {
+              console.error("Endpoint GET /users/:id not found in usage map");
+              process.exit(1);
+            }
+            if (!Array.isArray(endpointUsage["user_name"]) || endpointUsage["user_name"].length === 0) {
+              console.error("Expected path user_name not found in usage map");
+              process.exit(1);
+            }
+            if (!Array.isArray(endpointUsage["orders[].total"]) || endpointUsage["orders[].total"].length === 0) {
+              console.error("Expected path orders[].total not found in usage map");
+              process.exit(1);
+            }
+            console.log("Usage map verified successfully.");
+          ' "$USAGE_JSON"
+
+      - name: Verify GET /users/1 returns successful response
+        run: |
+          USER_JSON=$(curl -s -f http://localhost:4000/users/1)
+          echo "User response: $USER_JSON"
+
+          node -e '
+            const user = JSON.parse(process.argv[1]);
+            if (user.id !== "1") {
+              console.error("Expected user.id to be 1, got:", user.id);
+              process.exit(1);
+            }
+            if (user.user_name !== "alex_chen") {
+              console.error("Expected user.user_name to be alex_chen, got:", user.user_name);
+              process.exit(1);
+            }
+            console.log("GET /users/1 verified successfully.");
+          ' "$USER_JSON"
+
+      - name: Run Drift Sentinel classifier and generate PR comment
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            import { flattenShape, compareShapes } from "./classifier/src/index.js";
+
+            async function run() {
+              // 1. Load baseline shapes
+              if (!fs.existsSync("baseline-shapes.json")) {
+                throw new Error("Required baseline-shapes.json not found in repository root");
+              }
+              let baselineShapes;
+              try {
+                baselineShapes = JSON.parse(fs.readFileSync("baseline-shapes.json", "utf8"));
+              } catch (err) {
+                throw new Error(`Failed to parse baseline-shapes.json: ${err.message}`);
+              }
+
+              // 2. Fetch current Demo API response
+              let userData;
+              try {
+                const userRes = await fetch("http://localhost:4000/users/1");
+                if (!userRes.ok) {
+                  throw new Error(`HTTP ${userRes.status}: ${userRes.statusText}`);
+                }
+                userData = await userRes.json();
+              } catch (err) {
+                throw new Error(`Failed to fetch Demo API response from http://localhost:4000/users/1: ${err.message}`);
+              }
+
+              // 3. Flatten response into current shape map
+              let currentShapes;
+              try {
+                const endpointShape = flattenShape(userData);
+                currentShapes = {
+                  "GET /users/:id": endpointShape,
+                };
+              } catch (err) {
+                throw new Error(`Failed to flatten Demo API response: ${err.message}`);
+              }
+
+              // 4. Resolve usage map (Live Observer vs fallback)
+              let usageMap = null;
+              let liveUsage = null;
+
+              const isObserverAvailable = process.env.OBSERVER_AVAILABLE === "true";
+              if (isObserverAvailable) {
+                try {
+                  const usageRes = await fetch("http://localhost:5001/usage");
+                  if (usageRes.ok) {
+                    liveUsage = await usageRes.json();
+                  } else {
+                    console.warn(`Observer returned HTTP ${usageRes.status}`);
+                  }
+                } catch (err) {
+                  console.warn(`Failed to connect to Observer: ${err.message}`);
+                }
+              } else {
+                console.log("Observer is marked as unavailable. Skipping live usage fetch.");
+              }
+
+              const fallbackExists = fs.existsSync("usage.json");
+              const isLivePopulated = liveUsage && typeof liveUsage === "object" && Object.keys(liveUsage).length > 0;
+
+              if (isLivePopulated) {
+                console.log("Using live populated usage map from Observer.");
+                usageMap = liveUsage;
+              } else if (fallbackExists) {
+                console.log("Live usage map is unavailable or empty. Using usage.json fallback.");
+                try {
+                  usageMap = JSON.parse(fs.readFileSync("usage.json", "utf8"));
+                  if (!usageMap || typeof usageMap !== "object" || Array.isArray(usageMap) || Object.keys(usageMap).length === 0) {
+                    throw new Error("usage.json must contain a non-empty JSON object");
+                  }
+                } catch (err) {
+                  throw new Error(`Failed to validate usage.json fallback: ${err.message}`);
+                }
+              } else {
+                throw new Error("Neither a populated live usage map nor a valid usage.json fallback is available. Cannot proceed with classification.");
+              }
+
+              // 5. Compare shapes using classifier
+              let checkResults;
+              try {
+                checkResults = compareShapes(baselineShapes, currentShapes, usageMap);
+              } catch (err) {
+                throw new Error(`Classifier compareShapes failed: ${err.message}`);
+              }
+
+              console.log("Classifier check results:", JSON.stringify(checkResults, null, 2));
+
+              // 6. Format dynamic PR comment per docs/formats.md Section 5
+              const breaking = checkResults.filter((r) => r.verdict === "breaking");
+              const warnings = checkResults.filter((r) => r.verdict === "warn");
+              const safe = checkResults.filter((r) => r.verdict === "safe");
+
+              let verdictSummary = "";
+              if (breaking.length > 0) {
+                verdictSummary = `## Drift Sentinel Verdict: BREAKING (${breaking.length} breaking change${breaking.length === 1 ? "" : "s"})`;
+              } else if (warnings.length > 0) {
+                verdictSummary = `## Drift Sentinel Verdict: WARN (${warnings.length} warning${warnings.length === 1 ? "" : "s"})`;
+              } else {
+                verdictSummary = "## Drift Sentinel Verdict: SAFE";
+              }
+
+              const lines = [verdictSummary, ""];
+
+              if (breaking.length > 0) {
+                lines.push("### Breaking Changes");
+                for (const b of breaking) {
+                  const clients = b.affectedClients && b.affectedClients.length > 0 ? b.affectedClients.join(", ") : "none";
+                  lines.push(`- **${b.endpoint}** \`${b.path}\` (${b.changeType}) — affected: ${clients}`);
+                }
+                lines.push("");
+              }
+
+              if (warnings.length > 0) {
+                lines.push("### Warnings");
+                for (const w of warnings) {
+                  const clients = w.affectedClients && w.affectedClients.length > 0 ? w.affectedClients.join(", ") : "none";
+                  lines.push(`- **${w.endpoint}** \`${w.path}\` (${w.changeType}) — affected: ${clients}`);
+                }
+                lines.push("");
+              }
+
+              if (safe.length > 0) {
+                lines.push("### Safe Changes");
+                for (const s of safe) {
+                  lines.push(`- **${s.endpoint}** \`${s.path}\` (${s.changeType})`);
+                }
+                lines.push("");
+              }
+
+              if (checkResults.length === 0) {
+                lines.push("No schema changes detected against baseline shapes.");
+                lines.push("");
+              }
+
+              const commentContent = lines.join("\n");
+
+              // 7. Write comment and results to runner temp directory
+              const tempDir = process.env.RUNNER_TEMP || ".";
+              const commentPath = path.join(tempDir, "drift-comment.md");
+              const resultsPath = path.join(tempDir, "drift-results.json");
+
+              fs.writeFileSync(commentPath, commentContent, "utf8");
+              fs.writeFileSync(resultsPath, JSON.stringify(checkResults, null, 2), "utf8");
+              console.log(`Saved PR comment to ${commentPath}`);
+            }
+
+            run().catch((err) => {
+              console.error("Error during drift classification:", err);
+              process.exit(1);
+            });
+          '
+
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            cat "${RUNNER_TEMP:-.}/drift-comment.md" >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+      - name: Post dynamic PR comment
         uses: actions/github-script@v7
         with:
           script: |
-            const message = [
-              "## Drift Sentinel — CI test",
-              "",
-              "The GitHub Actions PR-comment integration is working.",
-              "",
-              "This is the Part 1 test comment. Shape comparison and usage-aware",
-              "breaking-change analysis will be added in the next stage."
-            ].join("\n");
+            const fs = require('fs');
+            const path = require('path');
+            const commentFile = path.join(process.env.RUNNER_TEMP || '.', 'drift-comment.md');
+
+            if (!fs.existsSync(commentFile)) {
+              throw new Error(`Drift comment file not found at ${commentFile}`);
+            }
+
+            const message = fs.readFileSync(commentFile, 'utf8');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
