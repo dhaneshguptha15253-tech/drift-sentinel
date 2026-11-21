@@ -29,13 +29,13 @@ jobs:
         run: npm --prefix observer install
 
       - name: Run Demo API test suite
-        run: npm --prefix demo-api test
+        run: node --test demo-api/test/users.test.js
 
       - name: Run Observer test suite
-        run: npm --prefix observer test
+        run: node --test observer/test/observer.test.js
 
       - name: Run Classifier test suite
-        run: npm --prefix classifier test
+        run: node --test classifier/test/classifier.test.js classifier/test/flatten.test.js classifier/test/comprehensive.test.js
 
       - name: Start Demo API
         run: nohup node demo-api/src/server.js > demo-api.log 2>&1 &
