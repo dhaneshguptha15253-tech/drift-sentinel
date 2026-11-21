@@ -1,0 +1,11 @@
+{
+  "name": "observer",
+  "version": "1.0.0",
+  "description": "Observer service for Drift Sentinel tracking usage reports",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/**/*.test.js"
+  }
+}
