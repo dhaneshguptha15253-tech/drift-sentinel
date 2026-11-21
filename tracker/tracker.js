@@ -2,9 +2,23 @@ const RAW = Symbol("raw");
 let cfg = null;
 const pending = new Map();
 
-// reportUrl = the observer's /reports address. Leave empty to just print reports.
-export function initTracker({ client, version, reportUrl = "", strict = false, flushMs = 5000 }) {
-  cfg = { client, version, reportUrl, strict };
+/**
+ * initTracker({ client, version, reportUrl, strict, flushMs, onReport })
+ *
+ * onReport(result) is called after every successful or failed flush attempt:
+ *   result.ok    – true if the POST succeeded (or no reportUrl was set)
+ *   result.count – number of reads that were in this batch
+ *   result.error – Error object when ok === false (undefined otherwise)
+ */
+export function initTracker({
+  client,
+  version,
+  reportUrl = "",
+  strict = false,
+  flushMs = 5000,
+  onReport = null,   // optional callback
+}) {
+  cfg = { client, version, reportUrl, strict, onReport };
   setInterval(flush, flushMs);
   if (typeof addEventListener === "function") addEventListener("pagehide", flush);
 }
@@ -57,7 +71,14 @@ export async function flush() {
   const reads = [...pending.values()];
   pending.clear();
   const body = { client: cfg.client, version: cfg.version, strict: cfg.strict, reads };
-  if (!cfg.reportUrl) return console.log("tracker report", JSON.stringify(body));
+
+  // No reportUrl – just log and call onReport with ok:true
+  if (!cfg.reportUrl) {
+    console.log("tracker report", JSON.stringify(body));
+    cfg.onReport?.({ ok: true, count: reads.length });
+    return;
+  }
+
   try {
     await fetch(cfg.reportUrl, {
       method: "POST",
@@ -65,7 +86,9 @@ export async function flush() {
       body: JSON.stringify(body),
       keepalive: true,
     });
+    cfg.onReport?.({ ok: true, count: reads.length });
   } catch (e) {
     reads.forEach((r) => record(r.endpoint, r.path)); // retry on the next flush
+    cfg.onReport?.({ ok: false, count: reads.length, error: e });
   }
 }
