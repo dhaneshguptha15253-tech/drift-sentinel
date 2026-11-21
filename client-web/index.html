@@ -4,15 +4,27 @@
   <meta charset="utf-8">
   <title>Demo client</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 480px; margin: 40px auto; }
+    body { font-family: Arial, sans-serif; max-width: 520px; margin: 40px auto; }
     #banner { background: #1F2A44; color: #fff; padding: 8px 12px; border-radius: 6px; }
     .missing { color: #fff; background: #d00; padding: 0 6px; border-radius: 4px; }
+    #debug {
+      margin-top: 20px;
+      border: 1px solid #aaa;
+      border-radius: 6px;
+      padding: 10px 14px;
+      background: #f5f5f5;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    #debug code { background: #ddd; padding: 0 4px; border-radius: 3px; }
   </style>
 </head>
 <body>
   <div id="banner"></div>
   <h2>Profile</h2>
   <ul id="out"></ul>
+  <!-- Debug panel: hidden by default; shown with ?debug=1 -->
+  <div id="debug" hidden></div>
   <script src="config.js"></script>
   <script type="module" src="app.js"></script>
 </body>

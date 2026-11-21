@@ -1,9 +1,20 @@
 {
-  "user_name": "Asha",
-  "email": "asha@example.com",
-  "address": { "city": "Pune" },
-  "orders": [{ "total": 499 }],
-  "plan": "pro",
-  "joined_at": "2026-01-15",
+  "user_name":  "Asha Mehta",
+  "email":      "asha@example.com",
+  "phone":      "+91-98765-43210",
+  "tier":       "gold",
+  "plan":       "pro",
+  "joined_at":  "2026-01-15",
+  "last_login": "2026-11-20T18:30:00Z",
+  "org":        "Acme Corp",
+  "address": {
+    "city":    "Pune",
+    "country": "India",
+    "zip":     "411001"
+  },
+  "orders": [
+    { "id": "ORD-001", "total": 499, "status": "delivered" },
+    { "id": "ORD-002", "total": 149, "status": "pending"   }
+  ],
   "legacy_flag": true
 }
