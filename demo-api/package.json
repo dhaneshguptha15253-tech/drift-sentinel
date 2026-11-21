@@ -1,0 +1,11 @@
+{
+  "name": "demo-api",
+  "version": "1.0.0",
+  "description": "Demo API for Drift Sentinel",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/**/*.test.js"
+  }
+}
