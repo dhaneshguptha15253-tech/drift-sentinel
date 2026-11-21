@@ -1,0 +1,20 @@
+{
+  "GET /users/:id": {
+    "id": "string",
+    "user_name": "string",
+    "email": "string",
+    "address.street": "string",
+    "address.city": "string",
+    "address.state": "string",
+    "address.postal_code": "string",
+    "address.country": "string",
+    "orders[].id": "string",
+    "orders[].total": "number",
+    "orders[].currency": "string",
+    "orders[].status": "string",
+    "orders[].created_at": "string",
+    "plan": "string",
+    "joined_at": "string",
+    "legacy_flag": "boolean"
+  }
+}
