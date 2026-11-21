@@ -10,10 +10,136 @@ permissions:
 
 jobs:
   drift-sentinel-comment:
-    name: Post test PR comment
+    name: Drift Sentinel CI and PR Comment
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Demo API dependencies
+        run: npm --prefix demo-api install
+
+      - name: Install Observer dependencies
+        run: npm --prefix observer install
+
+      - name: Run Demo API test suite
+        run: npm --prefix demo-api test
+
+      - name: Run Observer test suite
+        run: npm --prefix observer test
+
+      - name: Start Demo API
+        run: nohup node demo-api/src/server.js > demo-api.log 2>&1 &
+
+      - name: Start Observer
+        run: nohup node observer/src/server.js > observer.log 2>&1 &
+
+      - name: Wait for Demo API readiness
+        run: |
+          TIMEOUT=30
+          COUNTER=0
+          until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/users/1)" = "200" ]; do
+            if [ $COUNTER -ge $TIMEOUT ]; then
+              echo "Error: Demo API did not become ready within ${TIMEOUT}s"
+              cat demo-api.log 2>/dev/null || true
+              exit 1
+            fi
+            echo "Waiting for Demo API to be ready ($COUNTER/$TIMEOUT)..."
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+          done
+          echo "Demo API is ready."
+
+      - name: Wait for Observer readiness
+        run: |
+          TIMEOUT=30
+          COUNTER=0
+          until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/usage)" = "200" ]; do
+            if [ $COUNTER -ge $TIMEOUT ]; then
+              echo "Error: Observer did not become ready within ${TIMEOUT}s"
+              cat observer.log 2>/dev/null || true
+              exit 1
+            fi
+            echo "Waiting for Observer to be ready ($COUNTER/$TIMEOUT)..."
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+          done
+          echo "Observer is ready."
+
+      - name: Test POST /reports with tracker report
+        run: |
+          REPORT_PAYLOAD='{
+            "client": "web",
+            "version": "1",
+            "strict": false,
+            "reads": [
+              { "endpoint": "GET /users/:id", "path": "user_name" },
+              { "endpoint": "GET /users/:id", "path": "orders[].total" }
+            ]
+          }'
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:5001/reports \
+            -H "Content-Type: application/json" \
+            -d "$REPORT_PAYLOAD")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Status: $HTTP_CODE"
+          echo "Response Body: $HTTP_BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Error: POST /reports failed with status $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Verify GET /usage returns submitted report
+        run: |
+          USAGE_JSON=$(curl -s -f http://localhost:5001/usage)
+          echo "Usage map response: $USAGE_JSON"
+
+          node -e '
+            const usage = JSON.parse(process.argv[1]);
+            const endpointUsage = usage["GET /users/:id"];
+            if (!endpointUsage) {
+              console.error("Endpoint GET /users/:id not found in usage map");
+              process.exit(1);
+            }
+            if (!Array.isArray(endpointUsage["user_name"]) || endpointUsage["user_name"].length === 0) {
+              console.error("Expected path user_name not found in usage map");
+              process.exit(1);
+            }
+            if (!Array.isArray(endpointUsage["orders[].total"]) || endpointUsage["orders[].total"].length === 0) {
+              console.error("Expected path orders[].total not found in usage map");
+              process.exit(1);
+            }
+            console.log("Usage map verified successfully.");
+          ' "$USAGE_JSON"
+
+      - name: Verify GET /users/1 returns successful response
+        run: |
+          USER_JSON=$(curl -s -f http://localhost:4000/users/1)
+          echo "User response: $USER_JSON"
+
+          node -e '
+            const user = JSON.parse(process.argv[1]);
+            if (user.id !== "1") {
+              console.error("Expected user.id to be 1, got:", user.id);
+              process.exit(1);
+            }
+            if (user.user_name !== "alex_chen") {
+              console.error("Expected user.user_name to be alex_chen, got:", user.user_name);
+              process.exit(1);
+            }
+            console.log("GET /users/1 verified successfully.");
+          ' "$USER_JSON"
+
       - name: Post hardcoded test comment
         uses: actions/github-script@v7
         with:
