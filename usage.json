@@ -1,0 +1,112 @@
+{
+  "GET /users/:id": {
+    "user_name": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "email": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      },
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "phone": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "tier": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "address.city": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      },
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "address.country": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "address.zip": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "orders[].id": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "orders[].total": [
+      {
+        "client": "web",
+        "version": "1",
+        "strict": false
+      }
+    ],
+    "orders[].status": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "plan": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "joined_at": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "last_login": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ],
+    "org": [
+      {
+        "client": "web",
+        "version": "2",
+        "strict": false
+      }
+    ]
+  }
+}
