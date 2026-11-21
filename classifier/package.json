@@ -1,0 +1,10 @@
+{
+  "name": "classifier",
+  "version": "1.0.0",
+  "description": "Drift Sentinel Classifier: compares API shapes and flags breaking changes",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js"
+  }
+}
