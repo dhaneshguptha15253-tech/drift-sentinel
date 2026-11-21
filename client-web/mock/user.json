@@ -1,0 +1,9 @@
+{
+  "user_name": "Asha",
+  "email": "asha@example.com",
+  "address": { "city": "Pune" },
+  "orders": [{ "total": 499 }],
+  "plan": "pro",
+  "joined_at": "2026-01-15",
+  "legacy_flag": true
+}
